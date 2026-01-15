@@ -86,7 +86,7 @@ steps:
       - '--concurrency'
       - '${_CONCURRENCY}'
       - '--startup-probe'
-      - 'timeoutSeconds=300,periodSeconds=10,failureThreshold=30,tcpSocket.port=3000'
+      - 'timeoutSeconds=5,periodSeconds=10,failureThreshold=30,tcpSocket.port=3000'
       - '--set-env-vars'
       - 'NODE_ENV=production,NEXT_PUBLIC_WEBAPP_URL=${_NEXT_PUBLIC_WEBAPP_URL},NEXTAUTH_URL=${_NEXTAUTH_URL},DATABASE_URL=${_DATABASE_URL},DATABASE_DIRECT_URL=${_DATABASE_URL},NEXTAUTH_SECRET=${_NEXTAUTH_SECRET},CALENDSO_ENCRYPTION_KEY=${_CALENDSO_ENCRYPTION_KEY}'
     id: 'deploy-cloud-run-env'
