@@ -1,0 +1,118 @@
+steps:
+  # Build the container image with caching
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--cache-from'
+      - '${_IMAGE_TAG}:latest'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_WEBAPP_URL=${_NEXT_PUBLIC_WEBAPP_URL}'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_API_V2_URL=${_NEXT_PUBLIC_API_V2_URL}'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_LICENSE_CONSENT=${_NEXT_PUBLIC_LICENSE_CONSENT:-}'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_WEBSITE_TERMS_URL=${_NEXT_PUBLIC_WEBSITE_TERMS_URL:-}'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_WEBSITE_PRIVACY_POLICY_URL=${_NEXT_PUBLIC_WEBSITE_PRIVACY_POLICY_URL:-}'
+      - '--build-arg'
+      - 'CALCOM_TELEMETRY_DISABLED=${_CALCOM_TELEMETRY_DISABLED:-}'
+      - '--build-arg'
+      - 'DATABASE_URL=${_DATABASE_URL:-postgresql://placeholder}'
+      - '--build-arg'
+      - 'NEXTAUTH_SECRET=${_NEXTAUTH_SECRET:-secret}'
+      - '--build-arg'
+      - 'CALENDSO_ENCRYPTION_KEY=${_CALENDSO_ENCRYPTION_KEY:-secret}'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_SINGLE_ORG_SLUG=${_NEXT_PUBLIC_SINGLE_ORG_SLUG:-}'
+      - '--build-arg'
+      - 'ORGANIZATIONS_ENABLED=${_ORGANIZATIONS_ENABLED:-}'
+      - '--build-arg'
+      - 'CSP_POLICY=${_CSP_POLICY:-}'
+      - '--build-arg'
+      - 'MAX_OLD_SPACE_SIZE=${_MAX_OLD_SPACE_SIZE}'
+      - '-t'
+      - '${_IMAGE_TAG}:${BUILD_ID}'
+      - '-t'
+      - '${_IMAGE_TAG}:latest'
+      - '.'
+    id: 'build-image'
+    waitFor: ['-']
+
+  # Pull previous image for cache (if exists)
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        docker pull ${_IMAGE_TAG}:latest || echo "No previous image found, building from scratch"
+    id: 'pull-cache'
+    waitFor: ['-']
+  # Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_IMAGE_TAG}'
+    id: 'push-image'
+    waitFor: ['build-image']
+
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE_NAME}'
+      - '--image'
+      - '${_IMAGE_TAG}:${BUILD_ID}'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '${_PORT}'
+      - '--memory'
+      - '${_MEMORY}'
+      - '--cpu'
+      - '${_CPU}'
+      - '--min-instances'
+      - '${_MIN_INSTANCES}'
+      - '--max-instances'
+      - '${_MAX_INSTANCES}'
+      - '--timeout'
+      - '${_TIMEOUT}'
+      - '--concurrency'
+      - '${_CONCURRENCY}'
+      - '--startup-probe'
+      - 'timeoutSeconds=300,periodSeconds=10,failureThreshold=30,tcpSocket.port=3000'
+      - '--set-env-vars'
+      - 'NODE_ENV=production,NEXT_PUBLIC_WEBAPP_URL=${_NEXT_PUBLIC_WEBAPP_URL},NEXTAUTH_URL=${_NEXTAUTH_URL},DATABASE_URL=${_DATABASE_URL},DATABASE_DIRECT_URL=${_DATABASE_URL},NEXTAUTH_SECRET=${_NEXTAUTH_SECRET},CALENDSO_ENCRYPTION_KEY=${_CALENDSO_ENCRYPTION_KEY}'
+    id: 'deploy-cloud-run-env'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_32'
+  diskSizeGb: 100
+
+timeout: '7200s'
+
+substitutions:
+  _REGION: 'europe-west1'
+  _SERVICE_NAME: 'calcom'
+  _NEXT_PUBLIC_API_V2_URL: ''
+  _IMAGE_TAG: ''
+  _PORT: '3000'
+  _MEMORY: '4Gi'
+  _CPU: '2'
+  _MIN_INSTANCES: '0'
+  _MAX_INSTANCES: '10'
+  _TIMEOUT: '300'
+  _CONCURRENCY: '80'
+  _MAX_OLD_SPACE_SIZE: '8192'
+
+images:
+  - '${_IMAGE_TAG}:${BUILD_ID}'
+  - '${_IMAGE_TAG}:latest'
+
