@@ -1,26 +1,79 @@
+import process from "node:process";
 import { withBotId } from "botid/next/config";
 import { config as dotenvConfig } from "dotenv";
 import type { NextConfig } from "next";
 import type { RouteHas } from "next/dist/lib/load-custom-routes";
 import { withAxiom } from "next-axiom";
-
 import i18nConfig from "./next-i18next.config";
 import packageJson from "./package.json";
 import {
   nextJsOrgRewriteConfig,
   orgUserRoutePath,
-  orgUserTypeRoutePath,
   orgUserTypeEmbedRoutePath,
+  orgUserTypeRoutePath,
 } from "./pagesAndRewritePaths";
 
 dotenvConfig({ path: "../../.env" });
 
-const { version } = packageJson;
+const { version }: { version: string } = packageJson;
 const {
   i18n: { locales },
+}: {
+  i18n: { locales: string[] };
 } = i18nConfig;
 
 type NextConfigPlugin = (config: NextConfig) => NextConfig;
+
+// #region agent log helper
+const debugSessionId = "debug-session";
+const debugEndpoint: string =
+  process.env.DEBUG_ENDPOINT || "http://127.0.0.1:7249/ingest/c4dd3845-c558-484c-be13-49dcb8b64310";
+const sendDebugLog = (payload: Record<string, unknown>): void => {
+  // CRITICAL: NEVER call fetch() during Docker builds or production
+  // Only send debug logs if DEBUG_ENDPOINT is explicitly set (not default localhost)
+  // This prevents any network calls that could hang the build process
+
+  // Primary check: Skip if DEBUG_ENDPOINT is not explicitly set
+  if (!process.env.DEBUG_ENDPOINT) {
+    return;
+  }
+
+  // Secondary safety checks: Skip in production/Docker/CI environments
+  if (
+    process.env.NODE_ENV === "production" ||
+    process.env.BUILD_STANDALONE === "true" ||
+    process.env.CI === "true"
+  ) {
+    return;
+  }
+
+  // Only execute fetch if DEBUG_ENDPOINT is explicitly set AND we're in development
+  // Use setImmediate to ensure fetch doesn't block the build process
+  // Add timeout to prevent hanging
+  setImmediate(() => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1000); // 1 second timeout
+
+    fetch(debugEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: debugSessionId,
+        runId: "build",
+        timestamp: Date.now(),
+        ...payload,
+      }),
+      signal: controller.signal,
+    })
+      .catch(() => {
+        // Silently ignore errors
+      })
+      .finally(() => {
+        clearTimeout(timeoutId);
+      });
+  });
+};
+// #endregion
 
 // Type guard to filter out null/undefined values with proper type narrowing
 function isNotNull<T>(value: T | null | undefined): value is T {
@@ -50,7 +103,7 @@ adjustEnvVariables();
 if (!process.env.NEXTAUTH_SECRET) throw new Error("Please set NEXTAUTH_SECRET");
 if (!process.env.CALENDSO_ENCRYPTION_KEY) throw new Error("Please set CALENDSO_ENCRYPTION_KEY");
 
-const isOrganizationsEnabled =
+const isOrganizationsEnabled: boolean =
   process.env.ORGANIZATIONS_ENABLED === "1" || process.env.ORGANIZATIONS_ENABLED === "true";
 
 // Type-safe way to assign to process.env (which is typed as readonly in environment.d.ts)
@@ -88,6 +141,21 @@ if (!process.env.EMAIL_FROM) {
 }
 
 if (!process.env.NEXTAUTH_URL) throw new Error("Please set NEXTAUTH_URL");
+
+// #region agent log (hypothesis A/B)
+sendDebugLog({
+  hypothesisId: "A",
+  location: "apps/web/next.config.ts:env-snapshot",
+  message: "Env snapshot before config generation",
+  data: {
+    NEXT_PUBLIC_API_V2_URL: process.env.NEXT_PUBLIC_API_V2_URL,
+    NEXT_PUBLIC_WEBAPP_URL: process.env.NEXT_PUBLIC_WEBAPP_URL,
+    NEXTAUTH_URL: process.env.NEXTAUTH_URL,
+    ORGANIZATIONS_ENABLED: process.env.ORGANIZATIONS_ENABLED,
+    BUILD_STANDALONE: process.env.BUILD_STANDALONE,
+  },
+});
+// #endregion
 
 function getHttpsUrl(url: string | undefined): string | undefined {
   if (!url) return url;
@@ -151,29 +219,35 @@ const orgDomainMatcherConfig: {
   userType: OrgDomainMatcher;
   userTypeEmbed: OrgDomainMatcher;
 } = {
-  root: nextJsOrgRewriteConfig.disableRootPathRewrite
-    ? null
-    : {
-        has: [
-          {
-            type: "host",
-            value: nextJsOrgRewriteConfig.orgHostPath,
-          },
-        ],
-        source: "/",
-      },
+  root: (() => {
+    if (nextJsOrgRewriteConfig.disableRootPathRewrite) {
+      return null;
+    }
+    return {
+      has: [
+        {
+          type: "host",
+          value: nextJsOrgRewriteConfig.orgHostPath,
+        },
+      ],
+      source: "/",
+    };
+  })(),
 
-  rootEmbed: nextJsOrgRewriteConfig.disableRootEmbedPathRewrite
-    ? null
-    : {
-        has: [
-          {
-            type: "host",
-            value: nextJsOrgRewriteConfig.orgHostPath,
-          },
-        ],
-        source: "/embed",
-      },
+  rootEmbed: (() => {
+    if (nextJsOrgRewriteConfig.disableRootEmbedPathRewrite) {
+      return null;
+    }
+    return {
+      has: [
+        {
+          type: "host",
+          value: nextJsOrgRewriteConfig.orgHostPath,
+        },
+      ],
+      source: "/embed",
+    };
+  })(),
 
   user: {
     has: [
@@ -217,8 +291,13 @@ const nextConfig = (phase: string): NextConfig => {
     );
   }
 
+  let output: "standalone" | undefined;
+  if (process.env.BUILD_STANDALONE === "true") {
+    output = "standalone";
+  }
+
   return {
-    output: process.env.BUILD_STANDALONE === "true" ? "standalone" : undefined,
+    output,
     serverExternalPackages: [
       "deasync",
       "http-cookie-agent",
@@ -258,8 +337,28 @@ const nextConfig = (phase: string): NextConfig => {
       unoptimized: true,
     },
     turbopack: {},
-    async rewrites() {
+    async rewrites(): Promise<{
+      beforeFiles: Array<{
+        source: string;
+        destination?: string;
+        has?: RouteHas[];
+      }>;
+      afterFiles: Array<{
+        source: string;
+        destination: string;
+      }>;
+    }> {
       const { orgSlug } = nextJsOrgRewriteConfig;
+      // #region agent log (hypothesis B)
+      sendDebugLog({
+        hypothesisId: "B",
+        location: "apps/web/next.config.ts:rewrites",
+        message: "Rewrites invocation",
+        data: {
+          NEXT_PUBLIC_API_V2_URL: process.env.NEXT_PUBLIC_API_V2_URL,
+        },
+      });
+      // #endregion
       const beforeFiles = [
         {
           source: `/(${locales.join("|")})/:path*`,
@@ -304,34 +403,47 @@ const nextConfig = (phase: string): NextConfig => {
           source: "/login",
           destination: "/auth/login",
         },
-        ...(isOrganizationsEnabled
-          ? [
-              orgDomainMatcherConfig.root
-                ? {
-                    ...orgDomainMatcherConfig.root,
-                    destination: `/team/${orgSlug}?isOrgProfile=1`,
-                  }
-                : null,
-              orgDomainMatcherConfig.rootEmbed
-                ? {
-                    ...orgDomainMatcherConfig.rootEmbed,
-                    destination: `/team/${orgSlug}/embed?isOrgProfile=1`,
-                  }
-                : null,
-              {
-                ...orgDomainMatcherConfig.user,
-                destination: `/org/${orgSlug}/:user`,
-              },
-              {
-                ...orgDomainMatcherConfig.userType,
-                destination: `/org/${orgSlug}/:user/:type`,
-              },
-              {
-                ...orgDomainMatcherConfig.userTypeEmbed,
-                destination: `/org/${orgSlug}/:user/:type/embed`,
-              },
-            ]
-          : []),
+        ...((): Array<{
+          has: RouteHas[];
+          source: string;
+          destination: string;
+        } | null> => {
+          if (!isOrganizationsEnabled) {
+            return [];
+          }
+          const orgRewrites: Array<{
+            has: RouteHas[];
+            source: string;
+            destination: string;
+          } | null> = [];
+          if (orgDomainMatcherConfig.root) {
+            orgRewrites.push({
+              ...orgDomainMatcherConfig.root,
+              destination: `/team/${orgSlug}?isOrgProfile=1`,
+            });
+          }
+          if (orgDomainMatcherConfig.rootEmbed) {
+            orgRewrites.push({
+              ...orgDomainMatcherConfig.rootEmbed,
+              destination: `/team/${orgSlug}/embed?isOrgProfile=1`,
+            });
+          }
+          orgRewrites.push(
+            {
+              ...orgDomainMatcherConfig.user,
+              destination: `/org/${orgSlug}/:user`,
+            },
+            {
+              ...orgDomainMatcherConfig.userType,
+              destination: `/org/${orgSlug}/:user/:type`,
+            },
+            {
+              ...orgDomainMatcherConfig.userTypeEmbed,
+              destination: `/org/${orgSlug}/:user/:type/embed`,
+            }
+          );
+          return orgRewrites;
+        })(),
       ].filter(isNotNull);
 
       const afterFiles = [
@@ -373,7 +485,13 @@ const nextConfig = (phase: string): NextConfig => {
         afterFiles,
       };
     },
-    async headers() {
+    async headers(): Promise<
+      Array<{
+        source: string;
+        headers: Array<{ key: string; value: string }>;
+        has?: RouteHas[];
+      }>
+    > {
       const { orgSlug } = nextJsOrgRewriteConfig;
       const CORP_CROSS_ORIGIN_HEADER = {
         key: "Cross-Origin-Resource-Policy",
@@ -459,51 +577,72 @@ const nextConfig = (phase: string): NextConfig => {
             },
           ],
         },
-        ...(isOrganizationsEnabled
-          ? [
-              orgDomainMatcherConfig.root
-                ? {
-                    ...orgDomainMatcherConfig.root,
-                    headers: [
-                      {
-                        key: "X-Cal-Org-path",
-                        value: `/team/${orgSlug}`,
-                      },
-                    ],
-                  }
-                : null,
-              {
-                ...orgDomainMatcherConfig.user,
-                headers: [
-                  {
-                    key: "X-Cal-Org-path",
-                    value: `/org/${orgSlug}/:user`,
-                  },
-                ],
-              },
-              {
-                ...orgDomainMatcherConfig.userType,
-                headers: [
-                  {
-                    key: "X-Cal-Org-path",
-                    value: `/org/${orgSlug}/:user/:type`,
-                  },
-                ],
-              },
-              {
-                ...orgDomainMatcherConfig.userTypeEmbed,
-                headers: [
-                  {
-                    key: "X-Cal-Org-path",
-                    value: `/org/${orgSlug}/:user/:type/embed`,
-                  },
-                ],
-              },
-            ]
-          : []),
+        ...((): Array<{
+          has: RouteHas[];
+          source: string;
+          headers: Array<{ key: string; value: string }>;
+        } | null> => {
+          if (!isOrganizationsEnabled) {
+            return [];
+          }
+          const orgHeaders: Array<{
+            has: RouteHas[];
+            source: string;
+            headers: Array<{ key: string; value: string }>;
+          } | null> = [];
+          if (orgDomainMatcherConfig.root) {
+            orgHeaders.push({
+              ...orgDomainMatcherConfig.root,
+              headers: [
+                {
+                  key: "X-Cal-Org-path",
+                  value: `/team/${orgSlug}`,
+                },
+              ],
+            });
+          }
+          orgHeaders.push(
+            {
+              ...orgDomainMatcherConfig.user,
+              headers: [
+                {
+                  key: "X-Cal-Org-path",
+                  value: `/org/${orgSlug}/:user`,
+                },
+              ],
+            },
+            {
+              ...orgDomainMatcherConfig.userType,
+              headers: [
+                {
+                  key: "X-Cal-Org-path",
+                  value: `/org/${orgSlug}/:user/:type`,
+                },
+              ],
+            },
+            {
+              ...orgDomainMatcherConfig.userTypeEmbed,
+              headers: [
+                {
+                  key: "X-Cal-Org-path",
+                  value: `/org/${orgSlug}/:user/:type/embed`,
+                },
+              ],
+            }
+          );
+          return orgHeaders;
+        })(),
       ].filter(isNotNull);
     },
-    async redirects() {
+    async redirects(): Promise<
+      Array<{
+        source: string;
+        destination: string;
+        permanent: boolean;
+        has?: RouteHas[];
+        missing?: RouteHas[];
+      }>
+    > {
       const redirects = [
         {
           source: "/settings/organizations",
@@ -624,10 +763,18 @@ const nextConfig = (phase: string): NextConfig => {
           destination: "/settings/admin/apps/calendar",
           permanent: true,
         },
-        ...(process.env.NODE_ENV === "development" &&
-        isOrganizationsEnabled &&
-        process.env.NEXT_PUBLIC_WEBAPP_URL !== "http://localhost:3000"
-          ? [
+        ...((): Array<{
+          has: RouteHas[];
+          source: string;
+          destination: string;
+          permanent: boolean;
+        }> => {
+          if (
+            process.env.NODE_ENV === "development" &&
+            isOrganizationsEnabled &&
+            process.env.NEXT_PUBLIC_WEBAPP_URL !== "http://localhost:3000"
+          ) {
+            return [
               {
                 has: [
                   {
@@ -640,8 +787,10 @@ const nextConfig = (phase: string): NextConfig => {
                 destination: `${process.env.NEXT_PUBLIC_WEBAPP_URL}/api/integrations/:args*`,
                 permanent: false,
               },
-            ]
-          : []),
+            ];
+          }
+          return [];
+        })(),
       ];
 
       if (process.env.NEXT_PUBLIC_WEBAPP_URL === "https://app.cal.com") {

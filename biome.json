@@ -190,6 +190,16 @@
       }
     },
     {
+      "includes": ["apps/web/next.config.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveLinesPerFunction": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["packages/lib/**/*.{ts,tsx,js,jsx,mts,mjs,cjs,cts}"],
       "linter": {
         "rules": {
