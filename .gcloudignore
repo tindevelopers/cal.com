@@ -1,0 +1,72 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+.next/
+**/.next/
+dist/
+**/dist/
+build/
+**/build/
+.turbo/
+**/.turbo/
+
+# Git
+.git/
+.github/
+.gitignore
+
+# Testing
+coverage/
+**/coverage/
+test-results/
+**/test-results/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+playwright/
+vitest.config.*
+# playwright.config.*  # Commented out - needed for Docker build
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.example
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.circleci/
+
+# Misc
+.cache/
+*.cache
+.yarn/cache/
+.yarn/install-state.gz
+
