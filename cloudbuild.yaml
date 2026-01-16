@@ -102,7 +102,7 @@ substitutions:
   _REGION: 'europe-west1'
   _SERVICE_NAME: 'calcom'
   _NEXT_PUBLIC_API_V2_URL: ''
-  _IMAGE_TAG: ''
+  _IMAGE_TAG: 'gcr.io/${PROJECT_ID}/calcom'
   _PORT: '3000'
   _MEMORY: '4Gi'
   _CPU: '2'
