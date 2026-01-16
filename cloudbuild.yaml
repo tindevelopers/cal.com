@@ -57,6 +57,89 @@ steps:
     id: 'push-image'
     waitFor: ['build-image']
 
+  # Validate required environment variables before deployment
+  - name: 'bash'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        echo "Validating required environment variables..."
+        
+        # Function to check for newlines, trailing spaces, or breaks
+        check_var_clean() {
+          local var_name=$$1
+          local var_value=$$2
+          if echo "$$var_value" | grep -q $'\n\|[[:space:]]$$\|^[[:space:]]'; then
+            echo "ERROR: Variable $${var_name} contains newlines, trailing spaces, or leading spaces!"
+            echo "Value (first 50 chars): $${var_value:0:50}"
+            return 1
+          fi
+          return 0
+        }
+        
+        MISSING_VARS=()
+        DIRTY_VARS=()
+        
+        # Check DATABASE_URL
+        if [ -z "$${_DATABASE_URL}" ]; then
+          MISSING_VARS+=("_DATABASE_URL")
+        elif ! check_var_clean "_DATABASE_URL" "$${_DATABASE_URL}"; then
+          DIRTY_VARS+=("_DATABASE_URL")
+        fi
+        
+        # Check NEXTAUTH_SECRET
+        if [ -z "$${_NEXTAUTH_SECRET}" ]; then
+          MISSING_VARS+=("_NEXTAUTH_SECRET")
+        elif ! check_var_clean "_NEXTAUTH_SECRET" "$${_NEXTAUTH_SECRET}"; then
+          DIRTY_VARS+=("_NEXTAUTH_SECRET")
+        fi
+        
+        # Check CALENDSO_ENCRYPTION_KEY
+        if [ -z "$${_CALENDSO_ENCRYPTION_KEY}" ]; then
+          MISSING_VARS+=("_CALENDSO_ENCRYPTION_KEY")
+        elif ! check_var_clean "_CALENDSO_ENCRYPTION_KEY" "$${_CALENDSO_ENCRYPTION_KEY}"; then
+          DIRTY_VARS+=("_CALENDSO_ENCRYPTION_KEY")
+        fi
+        
+        # Check NEXT_PUBLIC_WEBAPP_URL
+        if [ -z "$${_NEXT_PUBLIC_WEBAPP_URL}" ]; then
+          MISSING_VARS+=("_NEXT_PUBLIC_WEBAPP_URL")
+        elif ! check_var_clean "_NEXT_PUBLIC_WEBAPP_URL" "$${_NEXT_PUBLIC_WEBAPP_URL}"; then
+          DIRTY_VARS+=("_NEXT_PUBLIC_WEBAPP_URL")
+        fi
+        
+        # Check NEXTAUTH_URL
+        if [ -z "$${_NEXTAUTH_URL}" ]; then
+          MISSING_VARS+=("_NEXTAUTH_URL")
+        elif ! check_var_clean "_NEXTAUTH_URL" "$${_NEXTAUTH_URL}"; then
+          DIRTY_VARS+=("_NEXTAUTH_URL")
+        fi
+        
+        # Report errors
+        if [ $${#MISSING_VARS[@]} -gt 0 ]; then
+          echo "ERROR: Missing required environment variables:"
+          for var in "$${MISSING_VARS[@]}"; do
+            echo "  - $${var}"
+          done
+          echo ""
+          echo "Please ensure all required substitutions are provided in the Cloud Build trigger."
+          exit 1
+        fi
+        
+        if [ $${#DIRTY_VARS[@]} -gt 0 ]; then
+          echo "ERROR: Environment variables contain newlines, trailing spaces, or leading spaces:"
+          for var in "$${DIRTY_VARS[@]}"; do
+            echo "  - $${var}"
+          done
+          echo ""
+          echo "Please clean the environment variables in the Cloud Build trigger configuration."
+          exit 1
+        fi
+        
+        echo "✓ All required environment variables are set and clean"
+    id: 'validate-env-vars'
+    waitFor: ['push-image']
+
   # Deploy container image to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
@@ -90,6 +173,7 @@ steps:
       - '--set-env-vars'
       - 'NODE_ENV=production,NEXT_PUBLIC_WEBAPP_URL=${_NEXT_PUBLIC_WEBAPP_URL},NEXTAUTH_URL=${_NEXTAUTH_URL},DATABASE_URL=${_DATABASE_URL},DATABASE_DIRECT_URL=${_DATABASE_URL},NEXTAUTH_SECRET=${_NEXTAUTH_SECRET},CALENDSO_ENCRYPTION_KEY=${_CALENDSO_ENCRYPTION_KEY}'
     id: 'deploy-cloud-run-env'
+    waitFor: ['validate-env-vars']
 
 options:
   logging: CLOUD_LOGGING_ONLY
