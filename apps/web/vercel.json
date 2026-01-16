@@ -1,4 +1,5 @@
 {
+  "buildCommand": "echo 'Vercel deployments are disabled. Deployments are handled via Google Cloud Run.' && exit 1",
   "crons": [
     {
       "path": "/api/cron/calendar-subscriptions",
