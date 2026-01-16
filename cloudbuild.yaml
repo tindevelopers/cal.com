@@ -70,11 +70,11 @@ steps:
         
         # Debug: Show all substitution variables
         echo "DEBUG: Checking substitution variables..."
-        echo "  _DATABASE_URL length: $${#_DATABASE_URL}"
-        echo "  _NEXTAUTH_SECRET length: $${#_NEXTAUTH_SECRET}"
-        echo "  _CALENDSO_ENCRYPTION_KEY length: $${#_CALENDSO_ENCRYPTION_KEY}"
         echo "  _NEXT_PUBLIC_WEBAPP_URL length: $${#_NEXT_PUBLIC_WEBAPP_URL}"
         echo "  _NEXTAUTH_URL length: $${#_NEXTAUTH_URL}"
+        echo ""
+        echo "Note: DATABASE_URL, NEXTAUTH_SECRET, and CALENDSO_ENCRYPTION_KEY"
+        echo "      are loaded from Secret Manager, not substitutions."
         
         # Function to check for newlines, trailing spaces, or breaks
         check_var_clean() {
@@ -91,43 +91,19 @@ steps:
         MISSING_VARS=()
         DIRTY_VARS=()
         
-        # Check DATABASE_URL
-        echo "DEBUG: Checking _DATABASE_URL..."
-        if [ -z "$${_DATABASE_URL}" ]; then
-          echo "DEBUG: _DATABASE_URL is empty or unset"
-          MISSING_VARS+=("_DATABASE_URL")
-        elif ! check_var_clean "_DATABASE_URL" "$${_DATABASE_URL}"; then
-          DIRTY_VARS+=("_DATABASE_URL")
-        else
-          echo "DEBUG: _DATABASE_URL is set and clean"
-        fi
+        # Note: DATABASE_URL, NEXTAUTH_SECRET, and CALENDSO_ENCRYPTION_KEY are now loaded from Secret Manager
+        # via --set-secrets flag, so they don't need to be in substitutions anymore.
+        # Only checking non-secret variables that must be in substitutions.
         
-        # Check NEXTAUTH_SECRET
-        echo "DEBUG: Checking _NEXTAUTH_SECRET..."
-        if [ -z "$${_NEXTAUTH_SECRET}" ]; then
-          echo "DEBUG: _NEXTAUTH_SECRET is empty or unset"
-          MISSING_VARS+=("_NEXTAUTH_SECRET")
-        elif ! check_var_clean "_NEXTAUTH_SECRET" "$${_NEXTAUTH_SECRET}"; then
-          DIRTY_VARS+=("_NEXTAUTH_SECRET")
-        else
-          echo "DEBUG: _NEXTAUTH_SECRET is set and clean"
-        fi
-        
-        # Check CALENDSO_ENCRYPTION_KEY
-        echo "DEBUG: Checking _CALENDSO_ENCRYPTION_KEY..."
-        if [ -z "$${_CALENDSO_ENCRYPTION_KEY}" ]; then
-          echo "DEBUG: _CALENDSO_ENCRYPTION_KEY is empty or unset"
-          MISSING_VARS+=("_CALENDSO_ENCRYPTION_KEY")
-        elif ! check_var_clean "_CALENDSO_ENCRYPTION_KEY" "$${_CALENDSO_ENCRYPTION_KEY}"; then
-          DIRTY_VARS+=("_CALENDSO_ENCRYPTION_KEY")
-        else
-          echo "DEBUG: _CALENDSO_ENCRYPTION_KEY is set and clean"
-        fi
-        
-        # Check NEXT_PUBLIC_WEBAPP_URL (optional - can be empty)
+        # Check NEXT_PUBLIC_WEBAPP_URL (required for build and runtime)
         echo "DEBUG: Checking _NEXT_PUBLIC_WEBAPP_URL..."
-        if [ -n "$${_NEXT_PUBLIC_WEBAPP_URL}" ] && ! check_var_clean "_NEXT_PUBLIC_WEBAPP_URL" "$${_NEXT_PUBLIC_WEBAPP_URL}"; then
+        if [ -z "$${_NEXT_PUBLIC_WEBAPP_URL}" ]; then
+          echo "DEBUG: _NEXT_PUBLIC_WEBAPP_URL is empty or unset"
+          MISSING_VARS+=("_NEXT_PUBLIC_WEBAPP_URL")
+        elif ! check_var_clean "_NEXT_PUBLIC_WEBAPP_URL" "$${_NEXT_PUBLIC_WEBAPP_URL}"; then
           DIRTY_VARS+=("_NEXT_PUBLIC_WEBAPP_URL")
+        else
+          echo "DEBUG: _NEXT_PUBLIC_WEBAPP_URL is set and clean"
         fi
         
         # Check NEXTAUTH_URL (optional - can be empty, will be derived from NEXT_PUBLIC_WEBAPP_URL)
@@ -151,10 +127,15 @@ steps:
           done
           echo ""
           echo "These variables are required for deployment."
-          echo "Please update the Cloud Build trigger to include these substitutions."
+          echo ""
+          echo "Note: DATABASE_URL, NEXTAUTH_SECRET, and CALENDSO_ENCRYPTION_KEY are"
+          echo "      automatically loaded from Secret Manager (calcom-database-url,"
+          echo "      calcom-nextauth-secret, calcom-encryption-key)."
+          echo ""
+          echo "Please update the Cloud Build trigger to include the missing substitutions."
           echo ""
           echo "You can update the trigger using:"
-          echo "  gcloud builds triggers update github cal-com-push-to-main --region=global --update-substitutions=_DATABASE_URL=...,_NEXTAUTH_SECRET=...,_CALENDSO_ENCRYPTION_KEY=..."
+          echo "  gcloud builds triggers update github cal-com-push-to-main --region=global --update-substitutions=_NEXT_PUBLIC_WEBAPP_URL=...,_NEXTAUTH_URL=..."
           exit 1
         fi
         
@@ -206,7 +187,9 @@ steps:
       - '--startup-probe'
       - 'timeoutSeconds=10,periodSeconds=10,failureThreshold=60,tcpSocket.port=3000'
       - '--set-env-vars'
-      - 'NODE_ENV=production,NEXT_PUBLIC_WEBAPP_URL=${_NEXT_PUBLIC_WEBAPP_URL},NEXTAUTH_URL=${_NEXTAUTH_URL},DATABASE_URL=${_DATABASE_URL},DATABASE_DIRECT_URL=${_DATABASE_URL},NEXTAUTH_SECRET=${_NEXTAUTH_SECRET},CALENDSO_ENCRYPTION_KEY=${_CALENDSO_ENCRYPTION_KEY}'
+      - 'NODE_ENV=production,NEXT_PUBLIC_WEBAPP_URL=${_NEXT_PUBLIC_WEBAPP_URL},NEXTAUTH_URL=${_NEXTAUTH_URL}'
+      - '--set-secrets'
+      - 'DATABASE_URL=calcom-database-url:latest,DATABASE_DIRECT_URL=calcom-database-url:latest,NEXTAUTH_SECRET=calcom-nextauth-secret:latest,CALENDSO_ENCRYPTION_KEY=calcom-encryption-key:latest'
     id: 'deploy-cloud-run-env'
     waitFor: ['validate-env-vars']
 
