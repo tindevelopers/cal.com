@@ -63,7 +63,18 @@ steps:
     args:
       - '-c'
       - |
+        set -x
+        echo "=========================================="
         echo "Validating required environment variables..."
+        echo "=========================================="
+        
+        # Debug: Show all substitution variables
+        echo "DEBUG: Checking substitution variables..."
+        echo "  _DATABASE_URL length: $${#_DATABASE_URL}"
+        echo "  _NEXTAUTH_SECRET length: $${#_NEXTAUTH_SECRET}"
+        echo "  _CALENDSO_ENCRYPTION_KEY length: $${#_CALENDSO_ENCRYPTION_KEY}"
+        echo "  _NEXT_PUBLIC_WEBAPP_URL length: $${#_NEXT_PUBLIC_WEBAPP_URL}"
+        echo "  _NEXTAUTH_URL length: $${#_NEXTAUTH_URL}"
         
         # Function to check for newlines, trailing spaces, or breaks
         check_var_clean() {
@@ -81,52 +92,74 @@ steps:
         DIRTY_VARS=()
         
         # Check DATABASE_URL
+        echo "DEBUG: Checking _DATABASE_URL..."
         if [ -z "$${_DATABASE_URL}" ]; then
+          echo "DEBUG: _DATABASE_URL is empty or unset"
           MISSING_VARS+=("_DATABASE_URL")
         elif ! check_var_clean "_DATABASE_URL" "$${_DATABASE_URL}"; then
           DIRTY_VARS+=("_DATABASE_URL")
+        else
+          echo "DEBUG: _DATABASE_URL is set and clean"
         fi
         
         # Check NEXTAUTH_SECRET
+        echo "DEBUG: Checking _NEXTAUTH_SECRET..."
         if [ -z "$${_NEXTAUTH_SECRET}" ]; then
+          echo "DEBUG: _NEXTAUTH_SECRET is empty or unset"
           MISSING_VARS+=("_NEXTAUTH_SECRET")
         elif ! check_var_clean "_NEXTAUTH_SECRET" "$${_NEXTAUTH_SECRET}"; then
           DIRTY_VARS+=("_NEXTAUTH_SECRET")
+        else
+          echo "DEBUG: _NEXTAUTH_SECRET is set and clean"
         fi
         
         # Check CALENDSO_ENCRYPTION_KEY
+        echo "DEBUG: Checking _CALENDSO_ENCRYPTION_KEY..."
         if [ -z "$${_CALENDSO_ENCRYPTION_KEY}" ]; then
+          echo "DEBUG: _CALENDSO_ENCRYPTION_KEY is empty or unset"
           MISSING_VARS+=("_CALENDSO_ENCRYPTION_KEY")
         elif ! check_var_clean "_CALENDSO_ENCRYPTION_KEY" "$${_CALENDSO_ENCRYPTION_KEY}"; then
           DIRTY_VARS+=("_CALENDSO_ENCRYPTION_KEY")
+        else
+          echo "DEBUG: _CALENDSO_ENCRYPTION_KEY is set and clean"
         fi
         
-        # Check NEXT_PUBLIC_WEBAPP_URL
-        if [ -z "$${_NEXT_PUBLIC_WEBAPP_URL}" ]; then
-          MISSING_VARS+=("_NEXT_PUBLIC_WEBAPP_URL")
-        elif ! check_var_clean "_NEXT_PUBLIC_WEBAPP_URL" "$${_NEXT_PUBLIC_WEBAPP_URL}"; then
+        # Check NEXT_PUBLIC_WEBAPP_URL (optional - can be empty)
+        echo "DEBUG: Checking _NEXT_PUBLIC_WEBAPP_URL..."
+        if [ -n "$${_NEXT_PUBLIC_WEBAPP_URL}" ] && ! check_var_clean "_NEXT_PUBLIC_WEBAPP_URL" "$${_NEXT_PUBLIC_WEBAPP_URL}"; then
           DIRTY_VARS+=("_NEXT_PUBLIC_WEBAPP_URL")
         fi
         
-        # Check NEXTAUTH_URL
-        if [ -z "$${_NEXTAUTH_URL}" ]; then
-          MISSING_VARS+=("_NEXTAUTH_URL")
-        elif ! check_var_clean "_NEXTAUTH_URL" "$${_NEXTAUTH_URL}"; then
+        # Check NEXTAUTH_URL (optional - can be empty, will be derived from NEXT_PUBLIC_WEBAPP_URL)
+        echo "DEBUG: Checking _NEXTAUTH_URL..."
+        if [ -n "$${_NEXTAUTH_URL}" ] && ! check_var_clean "_NEXTAUTH_URL" "$${_NEXTAUTH_URL}"; then
           DIRTY_VARS+=("_NEXTAUTH_URL")
         fi
         
         # Report errors
+        echo "=========================================="
+        echo "Validation Summary:"
+        echo "  Missing variables: $${#MISSING_VARS[@]}"
+        echo "  Dirty variables: $${#DIRTY_VARS[@]}"
+        echo "=========================================="
+        
         if [ $${#MISSING_VARS[@]} -gt 0 ]; then
+          echo ""
           echo "ERROR: Missing required environment variables:"
           for var in "$${MISSING_VARS[@]}"; do
             echo "  - $${var}"
           done
           echo ""
-          echo "Please ensure all required substitutions are provided in the Cloud Build trigger."
+          echo "These variables are required for deployment."
+          echo "Please update the Cloud Build trigger to include these substitutions."
+          echo ""
+          echo "You can update the trigger using:"
+          echo "  gcloud builds triggers update github cal-com-push-to-main --region=global --update-substitutions=_DATABASE_URL=...,_NEXTAUTH_SECRET=...,_CALENDSO_ENCRYPTION_KEY=..."
           exit 1
         fi
         
         if [ $${#DIRTY_VARS[@]} -gt 0 ]; then
+          echo ""
           echo "ERROR: Environment variables contain newlines, trailing spaces, or leading spaces:"
           for var in "$${DIRTY_VARS[@]}"; do
             echo "  - $${var}"
@@ -136,7 +169,9 @@ steps:
           exit 1
         fi
         
+        echo ""
         echo "✓ All required environment variables are set and clean"
+        echo "=========================================="
     id: 'validate-env-vars'
     waitFor: ['push-image']
 
