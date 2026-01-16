@@ -337,17 +337,7 @@ const nextConfig = (phase: string): NextConfig => {
       unoptimized: true,
     },
     turbopack: {},
-    async rewrites(): Promise<{
-      beforeFiles: Array<{
-        source: string;
-        destination?: string;
-        has?: RouteHas[];
-      }>;
-      afterFiles: Array<{
-        source: string;
-        destination: string;
-      }>;
-    }> {
+    async rewrites() {
       const { orgSlug } = nextJsOrgRewriteConfig;
       // #region agent log (hypothesis B)
       sendDebugLog({
@@ -485,13 +475,7 @@ const nextConfig = (phase: string): NextConfig => {
         afterFiles,
       };
     },
-    async headers(): Promise<
-      Array<{
-        source: string;
-        headers: Array<{ key: string; value: string }>;
-        has?: RouteHas[];
-      }>
-    > {
+    async headers() {
       const { orgSlug } = nextJsOrgRewriteConfig;
       const CORP_CROSS_ORIGIN_HEADER = {
         key: "Cross-Origin-Resource-Policy",
@@ -634,15 +618,7 @@ const nextConfig = (phase: string): NextConfig => {
         })(),
       ].filter(isNotNull);
     },
-    async redirects(): Promise<
-      Array<{
-        source: string;
-        destination: string;
-        permanent: boolean;
-        has?: RouteHas[];
-        missing?: RouteHas[];
-      }>
-    > {
+    async redirects() {
       const redirects = [
         {
           source: "/settings/organizations",
