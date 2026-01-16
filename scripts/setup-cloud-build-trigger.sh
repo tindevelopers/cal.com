@@ -170,13 +170,30 @@ fi
 
 NEXTAUTH_URL="${SERVICE_URL}/api/auth"
 
-# Get environment variables from current service
+# Try to get environment variables from current service
 ENV_VARS=$(gcloud run services describe $SERVICE_NAME --region=$REGION --format="get(spec.template.spec.containers[0].env)" 2>/dev/null || echo "")
 
 # Extract DATABASE_URL, NEXTAUTH_SECRET, CALENDSO_ENCRYPTION_KEY if available
-DATABASE_URL=$(echo "$ENV_VARS" | grep -oP "DATABASE_URL.*?value': '\K[^']*" || echo "")
-NEXTAUTH_SECRET=$(echo "$ENV_VARS" | grep -oP "NEXTAUTH_SECRET.*?value': '\K[^']*" || echo "")
-CALENDSO_ENCRYPTION_KEY=$(echo "$ENV_VARS" | grep -oP "CALENDSO_ENCRYPTION_KEY.*?value': '\K[^']*" || echo "")
+# Note: Using sed instead of grep -P for macOS compatibility
+DATABASE_URL=$(echo "$ENV_VARS" | sed -n "s/.*DATABASE_URL.*value': '\([^']*\)'.*/\1/p" | head -1)
+NEXTAUTH_SECRET=$(echo "$ENV_VARS" | sed -n "s/.*NEXTAUTH_SECRET.*value': '\([^']*\)'.*/\1/p" | head -1)
+CALENDSO_ENCRYPTION_KEY=$(echo "$ENV_VARS" | sed -n "s/.*CALENDSO_ENCRYPTION_KEY.*value': '\([^']*\)'.*/\1/p" | head -1)
+
+# If not found in service, try Secret Manager
+if [ -z "$DATABASE_URL" ]; then
+    echo -e "${YELLOW}Trying to retrieve DATABASE_URL from Secret Manager...${NC}"
+    DATABASE_URL=$(gcloud secrets versions access latest --secret="calcom-database-url" --project=$PROJECT_ID 2>/dev/null || echo "")
+fi
+
+if [ -z "$NEXTAUTH_SECRET" ]; then
+    echo -e "${YELLOW}Trying to retrieve NEXTAUTH_SECRET from Secret Manager...${NC}"
+    NEXTAUTH_SECRET=$(gcloud secrets versions access latest --secret="calcom-nextauth-secret" --project=$PROJECT_ID 2>/dev/null || echo "")
+fi
+
+if [ -z "$CALENDSO_ENCRYPTION_KEY" ]; then
+    echo -e "${YELLOW}Trying to retrieve CALENDSO_ENCRYPTION_KEY from Secret Manager...${NC}"
+    CALENDSO_ENCRYPTION_KEY=$(gcloud secrets versions access latest --secret="calcom-encryption-key" --project=$PROJECT_ID 2>/dev/null || echo "")
+fi
 
 # Determine image tag
 IMAGE_TAG="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
@@ -228,14 +245,15 @@ read -p "Press Enter to create the trigger or Ctrl+C to cancel..."
 echo ""
 echo -e "${GREEN}Creating Cloud Build trigger...${NC}"
 
+# Get repository resource path for 2nd gen connections
+REPOSITORY_PATH="projects/${PROJECT_ID}/locations/${CONNECTION_REGION}/connections/${CONNECTION_NAME}/repositories/${REPO_NAME}"
+
 gcloud builds triggers create github \
     --name="$TRIGGER_NAME" \
-    --repo-name="$REPO_NAME" \
-    --repo-owner="$REPO_OWNER" \
+    --repository="$REPOSITORY_PATH" \
     --branch-pattern="$BRANCH_PATTERN" \
     --build-config="cloudbuild.yaml" \
     --region="$CONNECTION_REGION" \
-    --connection="$CONNECTION_NAME" \
     --substitutions="$SUBSTITUTIONS" \
     --description="Automatically deploy Cal.com to Cloud Run on push to main branch" || {
     echo -e "${RED}Failed to create trigger.${NC}"
